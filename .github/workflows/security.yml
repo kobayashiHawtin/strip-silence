@@ -26,7 +26,7 @@ jobs:
           pip install bandit pip-audit
 
       - name: Dependency vulnerability audit
-        run: pip-audit --strict pyproject.toml
+        run: pip-audit --strict .
 
       - name: Install project
         run: pip install -e .
