@@ -20,14 +20,16 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install project and security tools
+      - name: Install security tools
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
           pip install bandit pip-audit
 
       - name: Dependency vulnerability audit
-        run: pip-audit --strict
+        run: pip-audit --strict pyproject.toml
+
+      - name: Install project
+        run: pip install -e .
 
       - name: Static security scan
         run: bandit -r src -ll
