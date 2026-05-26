@@ -1,0 +1,11 @@
+title = "strip-silence gitleaks config"
+
+[allowlist]
+description = "Allow GitHub Actions built-in token reference (not a hardcoded secret)"
+regexes = [
+  '''\$\{\{\s*secrets\.GITHUB_TOKEN\s*\}\}''',
+  '''secrets\.GITHUB_TOKEN''',
+]
+paths = [
+  '''^\.github/workflows/security\.yml$''',
+]

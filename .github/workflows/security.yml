@@ -26,7 +26,7 @@ jobs:
           pip install bandit pip-audit
 
       - name: Dependency vulnerability audit
-        run: pip-audit --strict .
+        run: pip-audit --strict pyproject.toml
 
       - name: Install project
         run: pip install -e .
@@ -51,3 +51,4 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: gitleaks.toml
