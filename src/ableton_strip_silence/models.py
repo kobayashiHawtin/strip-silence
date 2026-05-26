@@ -13,7 +13,7 @@ class TrackInfo:
     track_type: str
     name: str
     group_id: Optional[str]
-    group_path: list[str] = field(default_factory=list)
+    group_path: list[str] = field(default_factory=lambda: [])
     group_resolution: str = "unresolved"
     element: Optional[ET.Element] = None
 

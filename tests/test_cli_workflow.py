@@ -8,11 +8,11 @@ import unittest
 import wave
 import xml.etree.ElementTree as ET
 
-from als_reaper_sync.audio import parse_timecode_from_name, read_bwf_time_reference_samples, samples_to_beats
-from als_reaper_sync.cli import build_parser, resolve_auto_paths
-from als_reaper_sync.phase1 import build_rename_plan, execute_phase1
-from als_reaper_sync.phase2 import execute_phase2, parse_render_clips
-from als_reaper_sync.silence import TrimSettings, trim_directory
+from ableton_strip_silence.audio import parse_timecode_from_name, read_bwf_time_reference_samples, samples_to_beats
+from ableton_strip_silence.cli import build_parser, resolve_auto_paths
+from ableton_strip_silence.phase1 import build_rename_plan, execute_phase1
+from ableton_strip_silence.phase2 import execute_phase2, parse_render_clips
+from ableton_strip_silence.silence import TrimSettings, trim_directory
 
 
 SAMPLE_XML = """<?xml version='1.0' encoding='UTF-8'?>

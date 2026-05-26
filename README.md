@@ -10,7 +10,7 @@ It provides an end-to-end workflow:
 
 ## Features
 
-- Works with Ableton `.als` + exported WAVs (no Reaper dependency)
+- Works with Ableton `.als` + exported WAVs
 - Automatic silence detection with safe defaults for mixed material
 - `_tc_<sample_offset>` based placement for stable timeline restoration
 - BWF `bext` time reference support

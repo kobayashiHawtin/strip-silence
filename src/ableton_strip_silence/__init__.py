@@ -1,4 +1,4 @@
-"""als_reaper_sync package."""
+"""ableton_strip_silence package."""
 
 __all__ = ["__version__"]
 

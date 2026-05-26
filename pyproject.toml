@@ -21,7 +21,7 @@ classifiers = [
 ]
 
 [project.scripts]
-ableton-strip-silence = "als_reaper_sync.cli:main"
+ableton-strip-silence = "ableton_strip_silence.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
