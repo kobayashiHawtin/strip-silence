@@ -7,6 +7,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable, Optional
 import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as DefusedET
 
 from .models import ParsedSet, TrackInfo
 
@@ -33,7 +34,7 @@ def read_als(path: Path) -> ParsedSet:
     LOGGER.debug("Reading ALS file: %s", path)
     with gzip.open(path, "rb") as handle:
         data = handle.read()
-    root = ET.fromstring(data)
+    root = DefusedET.fromstring(data)
     tree = ET.ElementTree(root)
     namespace = detect_namespace(root)
     tracks = extract_tracks(root)
