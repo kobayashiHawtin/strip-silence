@@ -38,3 +38,7 @@ ableton-strip-silence/
 .ipynb_checkpoints/
 *.tmp
 *.bak
+
+*.code-workspace
+
+test_project_01 Project
