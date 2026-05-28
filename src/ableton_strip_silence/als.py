@@ -378,6 +378,11 @@ def update_file_ref(clip: ET.Element, namespace: str, file_path: Path, project_r
     if file_ref is None:
         file_ref = ET.SubElement(sample_ref, qname(namespace, "FileRef"))
 
+    for child in list(file_ref):
+        child_name = local_name(child.tag)
+        if child_name in {"Name", "FileName"}:
+            file_ref.remove(child)
+
     resolved_file_path = file_path.resolve()
     abs_path = resolved_file_path.as_posix()
     relative_path = abs_path
@@ -386,8 +391,6 @@ def update_file_ref(clip: ET.Element, namespace: str, file_path: Path, project_r
             relative_path = resolved_file_path.relative_to(project_root.resolve()).as_posix()
         except ValueError:
             relative_path = abs_path
-    file_name = file_path.name
-
     touched: set[str] = set()
     for node in file_ref.iter():
         node_name = local_name(node.tag)
@@ -397,16 +400,11 @@ def update_file_ref(clip: ET.Element, namespace: str, file_path: Path, project_r
         elif node_name == "RelativePath":
             node.attrib["Value"] = relative_path
             touched.add(node_name)
-        elif node_name in {"FileName", "Name"}:
-            node.attrib["Value"] = file_name
-            touched.add(node_name)
 
     if "Path" not in touched:
         append_value_element(file_ref, namespace, "Path", abs_path)
     if "RelativePath" not in touched:
         append_value_element(file_ref, namespace, "RelativePath", relative_path)
-    if "Name" not in touched and "FileName" not in touched:
-        append_value_element(file_ref, namespace, "Name", file_name)
 
 
 def update_sample_ref_metadata(
@@ -436,6 +434,62 @@ def update_sample_ref_metadata(
             append_value_element(sample_ref, namespace, "LastModDate", str(modified_at))
 
 
+def find_project_root(start: Path) -> Path:
+    """Walk up from start looking for a directory containing 'Ableton Project Info/'."""
+    current = start.resolve()
+    while current.parent != current:
+        if (current / "Ableton Project Info").is_dir():
+            return current
+        current = current.parent
+    return start
+
+
+def fix_orphan_clips(parsed: ParsedSet) -> None:
+    """Clean up clips that were not rebuilt (orphaned on unmatched tracks).
+
+    - Updates FileRef RelativePath to project-root-relative.
+    - Disables looping on orphan clips.
+    """
+    namespace = parsed.namespace
+    project_root = find_project_root(parsed.path)
+    ref_count = 0
+    loop_count = 0
+    for file_ref in parsed.root.iter(qname(namespace, "FileRef")):
+        path_el = file_ref.find(qname(namespace, "Path"))
+        if path_el is None or not path_el.get("Value"):
+            continue
+        abs_path_str = path_el.get("Value")
+        if not abs_path_str.replace("\\", "/").startswith("/") and ":" not in abs_path_str:
+            continue
+        abs_path = Path(abs_path_str)
+        try:
+            rel = abs_path.resolve().relative_to(project_root.resolve()).as_posix()
+        except ValueError:
+            continue
+        rel_el = file_ref.find(qname(namespace, "RelativePath"))
+        if rel_el is not None:
+            rel_el.set("Value", rel)
+        rpt_el = file_ref.find(qname(namespace, "RelativePathType"))
+        if rpt_el is not None:
+            rpt_el.set("Value", "3")
+        ref_count += 1
+
+    for clip_node in parsed.root.iter(qname(namespace, "AudioClip")):
+        if not set_value_on_first_descendant(clip_node, {"LoopOn"}, "false"):
+            append_value_element(clip_node, namespace, "LoopOn", "false")
+            loop_count += 1
+        else:
+            loop_count += 1
+        # Ensure Warp is OFF on orphan clips (warp markers stay — Required by Ableton)
+        if not set_value_on_first_descendant(clip_node, {"IsWarped"}, "false"):
+            pass  # IsWarped may not exist; that's OK
+
+    if ref_count:
+        LOGGER.info("Fixed %d orphan FileRef(s) to use project-root-relative paths.", ref_count)
+    if loop_count:
+        LOGGER.info("Disabled looping on %d orphan clip(s).", loop_count)
+
+
 def build_audio_clip(
     parsed: ParsedSet,
     track: TrackInfo,
@@ -446,16 +500,23 @@ def build_audio_clip(
     duration_samples: int | None = None,
     sample_rate: int | None = None,
     template: ET.Element | None = None,
+    fallback_to_template: bool = True,
 ) -> ET.Element:
-    template = copy.deepcopy(template) if template is not None else find_audio_clip_template(parsed.root, track)
+    if template is not None:
+        template = copy.deepcopy(template)
+    elif fallback_to_template:
+        template = find_audio_clip_template(parsed.root, track)
     namespace = parsed.namespace
+    project_root = find_project_root(parsed.path)
     source_start = "0"
     source_end = None
     source_out_marker = None
+    beat_duration = None
     if duration_samples is not None and sample_rate is not None and sample_rate > 0:
         duration_seconds = duration_samples / sample_rate
         source_end = f"{duration_seconds:.12f}"
-        source_out_marker = f"{duration_seconds * 2.0:.12f}"
+        source_out_marker = source_end
+        beat_duration = end_beats - start_beats
 
     if template is None:
         LOGGER.debug("No existing AudioClip template found. Creating a minimal AudioClip node.")
@@ -464,8 +525,26 @@ def build_audio_clip(
         append_value_element(clip, namespace, "LomId", str(next_numeric_value(parsed.root, {"LomId"}, default_start=1)))
         append_value_element(clip, namespace, "CurrentStart", f"{start_beats:.12f}")
         append_value_element(clip, namespace, "CurrentEnd", f"{end_beats:.12f}")
+        loop_el = ET.SubElement(clip, qname(namespace, "Loop"))
+        append_value_element(loop_el, namespace, "LoopOn", "false")
+        append_value_element(loop_el, namespace, "LoopStart", source_start)
+        if source_end is not None:
+            append_value_element(loop_el, namespace, "LoopEnd", source_end)
+        append_value_element(loop_el, namespace, "OutMarker", source_out_marker or source_end or source_start)
+        append_value_element(loop_el, namespace, "HiddenLoopStart", source_start)
+        append_value_element(loop_el, namespace, "HiddenLoopEnd", source_end or source_start)
+        append_value_element(clip, namespace, "IsWarped", "false")
+        append_value_element(clip, namespace, "WarpMode", "0")
+        warp_markers = ET.SubElement(clip, qname(namespace, "WarpMarkers"))
+        for mid, sec_time, beat_time in ((0, "0", "0"), (1, source_end or "0", f"{beat_duration:.12f}" if beat_duration is not None else "0")):
+            marker = ET.SubElement(warp_markers, qname(namespace, "WarpMarker"))
+            marker.attrib["Id"] = str(mid)
+            marker.attrib["SecTime"] = sec_time
+            marker.attrib["BeatTime"] = beat_time
+        ET.SubElement(clip, qname(namespace, "SavedWarpMarkersForStretched"))
+        append_value_element(clip, namespace, "MarkersGenerated", "false")
         update_source_timing(clip, source_start, source_end, source_out_marker)
-        update_file_ref(clip, namespace, file_path, parsed.path.parent)
+        update_file_ref(clip, namespace, file_path, project_root)
         update_sample_ref_metadata(clip, namespace, file_path, duration_samples, sample_rate)
         return clip
 
@@ -484,8 +563,12 @@ def build_audio_clip(
         append_value_element(clip, namespace, "CurrentStart", f"{start_beats:.12f}")
     if not set_value_on_first_descendant(clip, {"CurrentEnd", "End", "ClipEnd"}, f"{end_beats:.12f}"):
         append_value_element(clip, namespace, "CurrentEnd", f"{end_beats:.12f}")
+    if not set_value_on_first_descendant(clip, {"LoopOn"}, "false"):
+        append_value_element(clip, namespace, "LoopOn", "false")
+    if not set_value_on_first_descendant(clip, {"WarpOn"}, "false"):
+        append_value_element(clip, namespace, "WarpOn", "false")
     update_source_timing(clip, source_start, source_end, source_out_marker)
-    update_file_ref(clip, namespace, file_path, parsed.path.parent)
+    update_file_ref(clip, namespace, file_path, project_root)
     update_sample_ref_metadata(clip, namespace, file_path, duration_samples, sample_rate)
     return clip
 

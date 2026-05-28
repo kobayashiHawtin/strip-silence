@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 import re
 import struct
+from typing import Any
 
 from . import __version__
 
@@ -348,7 +349,7 @@ def trim_directory(
     settings: TrimSettings,
     dry_run: bool = False,
     manifest_path: Path | None = None,
-) -> dict:
+) -> dict[str, Any]:
     validate_trim_settings(settings)
     files = collect_audio_files(inputs_dir)
     if not files:
@@ -442,7 +443,7 @@ def validate_trim_settings(settings: TrimSettings) -> None:
             raise ValueError("threshold_db must be a finite number when provided.")
 
 
-def build_analysis_entry(wave: WaveData, result: DetectionResult) -> dict:
+def build_analysis_entry(wave: WaveData, result: DetectionResult) -> dict[str, Any]:
     return {
         "source": str(wave.path),
         "threshold_mode": result.threshold_mode,

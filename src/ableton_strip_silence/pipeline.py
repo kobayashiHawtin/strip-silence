@@ -6,6 +6,7 @@ import json
 import logging
 from pathlib import Path
 import shutil
+from typing import Any
 
 from . import __version__
 from .phase1 import execute_phase1
@@ -25,20 +26,23 @@ def execute_auto(
     clear_existing: bool = True,
     dry_run: bool = False,
     manifest_path: Path | None = None,
-) -> dict:
+) -> dict[str, Any]:
     renamed_dir = work_dir / "01_renamed"
     clips_dir = work_dir / "02_stripped_clips"
+    placed_als_path = work_dir / "placed.als"
     work_dir.mkdir(parents=True, exist_ok=True)
     if not dry_run:
         clean_auto_outputs(renamed_dir, clips_dir)
 
-    LOGGER.info("Auto pipeline step 1/3: rename Live exports")
+    LOGGER.info("Auto pipeline step 1/3: rename Live exports and place stems into ALS")
     rename_manifest = execute_phase1(
         als_path=als_path,
         exports_dir=exports_dir,
         output_dir=renamed_dir,
         dry_run=dry_run,
         manifest_path=work_dir / "rename_manifest.json",
+        place_als_path=placed_als_path,
+        bpm_override=bpm_override,
     )
 
     if dry_run:
@@ -77,14 +81,14 @@ def execute_auto(
         manifest_path=work_dir / "strip_silence_manifest.json",
     )
 
-    LOGGER.info("Auto pipeline step 3/3: restore clips into ALS")
+    LOGGER.info("Auto pipeline step 3/3: restore clips into placed ALS")
     matched_track_indices = {entry["track_index"] for entry in rename_manifest.get("operations", [])}
     restore_manifest = execute_phase2(
-        als_path=als_path,
+        als_path=placed_als_path,
         renders_dir=clips_dir,
         output_path=output_als,
         bpm_override=bpm_override,
-        clear_existing=clear_existing,
+        clear_existing=True,
         clear_track_indices=matched_track_indices,
         dry_run=dry_run,
         manifest_path=work_dir / "restore_manifest.json",

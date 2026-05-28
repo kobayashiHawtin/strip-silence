@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
-from .als import build_audio_clip, clear_audio_clips, find_audio_clip_template, insert_clip, read_als, track_by_index, track_by_name, write_als
+from .als import build_audio_clip, clear_audio_clips, find_arrangement_events_container, fix_orphan_clips, insert_clip, read_als, track_by_index, track_by_name, write_als
 from .audio import extract_serial_index, read_wave_metadata, resolve_render_start_samples, samples_to_beats
 from . import __version__
 from .models import ParsedSet
@@ -39,15 +40,17 @@ def parse_render_clips(
     if not render_files:
         raise Phase2RestoreError(f"No timecoded WAV clips found in '{renders_dir}'.")
 
+    audio_tracks = [t for t in parsed.tracks if t.track_type == "AudioTrack"]
+
     render_clips: list[RenderClip] = []
     for render_path in render_files:
         base_name, start_samples = resolve_render_start_samples(render_path)
         sample_rate, frame_count = read_wave_metadata(render_path)
 
         serial_index = extract_serial_index(base_name)
-        matched_track = track_by_index(parsed.tracks, serial_index) if serial_index is not None else None
+        matched_track = track_by_index(audio_tracks, serial_index) if serial_index is not None else None
         if matched_track is None:
-            matched_track = track_by_name(parsed.tracks, base_name)
+            matched_track = track_by_name(audio_tracks, base_name)
         if matched_track is None:
             raise Phase2RestoreError(f"Could not match timecoded clip '{render_path.name}' to any ALS track.")
 
@@ -75,14 +78,13 @@ def execute_phase2(
     clear_track_indices: set[int] | None = None,
     dry_run: bool = False,
     manifest_path: Path | None = None,
-) -> dict:
+) -> dict[str, Any]:
     parsed = read_als(als_path)
     bpm = bpm_override if bpm_override is not None else parsed.tempo_bpm
     if bpm is None:
         raise Phase2RestoreError("Could not determine BPM from ALS. Please provide --bpm explicitly.")
 
     render_clips, _ = parse_render_clips(als_path, renders_dir, bpm_override=bpm, parsed_set=parsed)
-    track_templates = {clip.matched_track.index: find_audio_clip_template(parsed.root, clip.matched_track) for clip in render_clips}
 
     if clear_existing:
         cleared_track_indices: set[int] = set()
@@ -102,7 +104,13 @@ def execute_phase2(
             cleared_track_indices.add(track.index)
 
     inserted_entries: list[dict] = []
+    skipped_tracks: list[str] = []
     for render in render_clips:
+        container = find_arrangement_events_container(render.matched_track)
+        if container is None:
+            LOGGER.warning("Skipping track '%s': no arrangement events container (MIDI track?).", render.matched_track.name)
+            skipped_tracks.append(render.matched_track.name)
+            continue
         start_beats = samples_to_beats(render.start_samples, render.sample_rate, bpm)
         end_beats = samples_to_beats(render.start_samples + render.duration_samples, render.sample_rate, bpm)
         LOGGER.info(
@@ -121,7 +129,7 @@ def execute_phase2(
             end_beats=end_beats,
             duration_samples=render.duration_samples,
             sample_rate=render.sample_rate,
-            template=track_templates.get(render.matched_track.index),
+            fallback_to_template=False,
         )
         insert_clip(parsed, render.matched_track, clip)
         inserted_entries.append(
@@ -139,6 +147,8 @@ def execute_phase2(
 
     if not dry_run:
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        parsed.path = output_path
+        fix_orphan_clips(parsed)
         write_als(parsed, output_path)
 
     manifest_output = manifest_path or output_path.with_suffix(".phase2_manifest.json")
