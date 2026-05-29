@@ -102,7 +102,7 @@ def add_trim_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--min-silence-ms", type=float, default=350.0, help="Minimum silent gap length used to split clips.")
     parser.add_argument("--min-clip-ms", type=float, default=80.0, help="Drop detected clips shorter than this duration.")
     parser.add_argument("--keep-leading-ms", type=float, default=20.0, help="Keep this much audio before each detected active region.")
-    parser.add_argument("--keep-trailing-ms", type=float, default=120.0, help="Keep this much audio after each detected active region.")
+    parser.add_argument("--keep-trailing-ms", type=float, default=40.0, help="Keep this much audio after each detected active region.")
     parser.add_argument("--window-ms", type=float, default=20.0, help="Analysis window length.")
     parser.add_argument("--hop-ms", type=float, default=10.0, help="Analysis hop length.")
     parser.add_argument("--detection", choices=["hybrid", "peak", "rms"], default="hybrid", help="Activity detector. Hybrid is the safe default for mixed material.")
