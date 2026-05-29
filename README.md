@@ -120,7 +120,7 @@ Default log: `<output>.parent/phase2.log`
 - `--min-silence-ms VALUE` (default: 350): Minimum silent gap length to split clips
 - `--min-clip-ms VALUE` (default: 80): Drop detected clips shorter than this duration (ms)
 - `--keep-leading-ms VALUE` (default: 20): Keep this much audio before detected active regions (ms)
-- `--keep-trailing-ms VALUE` (default: 120): Keep this much audio after detected active regions (ms)
+- `--keep-trailing-ms VALUE` (default: 40): Keep this much audio after detected active regions (ms)
 - `--window-ms VALUE` (default: 20): Analysis window length (ms)
 - `--hop-ms VALUE` (default: 10): Analysis hop length (ms)
 

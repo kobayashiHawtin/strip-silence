@@ -29,7 +29,7 @@ class TrimSettings:
     min_silence_ms: float = 350.0
     min_clip_ms: float = 80.0
     keep_leading_ms: float = 20.0
-    keep_trailing_ms: float = 120.0
+    keep_trailing_ms: float = 40.0
     window_ms: float = 20.0
     hop_ms: float = 10.0
     detection: str = "hybrid"
@@ -234,13 +234,12 @@ def adaptive_threshold(measured_windows: list[tuple[int, int, float]]) -> float:
     if not nonzero:
         return threshold_to_amplitude(-60.0)
 
-    noise_floor = percentile(nonzero, 10.0)
+    noise_floor = percentile(nonzero, 5.0)
     signal_reference = percentile(nonzero, 95.0)
 
-    conservative_floor = threshold_to_amplitude(-60.0)
-    threshold = max(conservative_floor, noise_floor * 3.0)
+    threshold = noise_floor * 1.5
     if signal_reference > 0:
-        threshold = min(threshold, max(conservative_floor, signal_reference * 0.5))
+        threshold = min(threshold, signal_reference * 0.5)
     return max(threshold, threshold_to_amplitude(-90.0))
 
 
