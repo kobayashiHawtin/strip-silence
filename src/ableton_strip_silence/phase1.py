@@ -251,8 +251,9 @@ def execute_phase1(
     manifest_path: Path | None = None,
     place_als_path: Path | None = None,
     bpm_override: float | None = None,
+    parsed_set: ParsedSet | None = None,
 ) -> dict[str, Any]:
-    parsed = read_als(als_path)
+    parsed = parsed_set if parsed_set is not None else read_als(als_path)
     operations, warnings = build_rename_plan(als_path, exports_dir, output_dir, parsed_set=parsed)
     output_dir.mkdir(parents=True, exist_ok=True)
 

@@ -79,8 +79,9 @@ def execute_phase2(
     clear_track_indices: set[int] | None = None,
     dry_run: bool = False,
     manifest_path: Path | None = None,
+    parsed_set: ParsedSet | None = None,
 ) -> dict[str, Any]:
-    parsed = read_als(als_path)
+    parsed = parsed_set if parsed_set is not None else read_als(als_path)
     bpm = bpm_override if bpm_override is not None else parsed.tempo_bpm
     if bpm is None:
         raise Phase2RestoreError("Could not determine BPM from ALS. Please provide --bpm explicitly.")

@@ -9,6 +9,7 @@ import shutil
 from typing import Any
 
 from . import __version__
+from .als import read_als
 from .phase1 import execute_phase1
 from .phase2 import execute_phase2
 from .silence import TrimSettings, trim_directory
@@ -34,6 +35,7 @@ def execute_auto(
     if not dry_run:
         clean_auto_outputs(renamed_dir, clips_dir)
 
+    parsed = read_als(als_path)
     LOGGER.info("Auto pipeline step 1/3: rename Live exports and place stems into ALS")
     rename_manifest = execute_phase1(
         als_path=als_path,
@@ -43,6 +45,7 @@ def execute_auto(
         manifest_path=work_dir / "rename_manifest.json",
         place_als_path=placed_als_path,
         bpm_override=bpm_override,
+        parsed_set=parsed,
     )
 
     if dry_run:
@@ -92,6 +95,7 @@ def execute_auto(
         clear_track_indices=matched_track_indices,
         dry_run=dry_run,
         manifest_path=work_dir / "restore_manifest.json",
+        parsed_set=parsed,
     )
 
     manifest_output = manifest_path or work_dir / "auto_manifest.json"
