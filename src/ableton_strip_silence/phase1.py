@@ -30,6 +30,24 @@ def collect_export_files(directory: Path) -> list[Path]:
     return sorted(path for path in directory.iterdir() if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS)
 
 
+def _build_file_cache(export_files: list[Path], project_name: str) -> dict[Path, dict]:
+    cache: dict[Path, dict] = {}
+    for path in export_files:
+        stem = path.stem
+        stripped = strip_stem_prefix(stem, project_name)
+        prefix_stripped = strip_project_prefix(stem, project_name)
+        cache[path] = {
+            "stem": stem,
+            "able_stripped": stripped,
+            "able_norm": normalize_name(stripped) if stripped else None,
+            "able_canon": canonical_name(stripped) if stripped else None,
+            "prefix_stripped": prefix_stripped,
+            "norm2": normalize_name(prefix_stripped),
+            "canon2": canonical_name(prefix_stripped),
+        }
+    return cache
+
+
 def build_rename_plan(
     als_path: Path,
     exports_dir: Path,
@@ -42,6 +60,7 @@ def build_rename_plan(
     if not export_files:
         raise Phase1MatchError(f"No supported audio files found in '{exports_dir}'.")
 
+    file_cache = _build_file_cache(export_files, project_name)
     unmatched_files = export_files.copy()
     operations: list[RenameOperation] = []
     warnings: list[str] = []
@@ -49,7 +68,7 @@ def build_rename_plan(
     for track in parsed.tracks:
         if track.track_type != "AudioTrack":
             continue
-        match, strategy = match_export_file(track, project_name, unmatched_files)
+        match, strategy = match_export_file(track, project_name, unmatched_files, file_cache)
         if match is None:
             warning = f"No exported file matched track '{track.name}' (index {track.index})."
             LOGGER.warning(warning)
@@ -95,7 +114,12 @@ def _canonical_candidates(track: TrackInfo) -> set[str]:
     return {canonical_name(track.name), canonical_name(track.prefixed_name)}
 
 
-def match_export_file(track: TrackInfo, project_name: str, available_files: list[Path]) -> tuple[Path | None, str]:
+def match_export_file(
+    track: TrackInfo,
+    project_name: str,
+    available_files: list[Path],
+    file_cache: dict[Path, dict] | None = None,
+) -> tuple[Path | None, str]:
     candidates = _candidates(track)
     canon_candidates = _canonical_candidates(track)
 
@@ -105,28 +129,52 @@ def match_export_file(track: TrackInfo, project_name: str, available_files: list
     canonical_matches: list[Path] = []
     fuzzy_matches: list[Path] = []
     for path in available_files:
-        able_stripped = strip_stem_prefix(path.stem, project_name)
-        if able_stripped is None:
-            continue
-        able_norm = normalize_name(able_stripped)
-        if able_norm in candidates:
-            ableton_matches.append(path)
-            continue
-        able_canon = canonical_name(able_stripped)
-        if able_canon in canon_candidates or any(able_canon.startswith(c) for c in canon_candidates):
-            ableton_canon_matches.append(path)
-            continue
-        prefix_stripped = strip_project_prefix(path.stem, project_name)
-        norm2 = normalize_name(prefix_stripped)
-        canon2 = canonical_name(prefix_stripped)
-        if norm2 in candidates:
-            exact_prefix_matches.append(path)
-            continue
-        if canon2 in canon_candidates or any(canon2.startswith(c) for c in canon_candidates):
-            canonical_matches.append(path)
-            continue
-        if any(norm2.startswith(c) for c in candidates):
-            fuzzy_matches.append(path)
+        if file_cache is not None and path in file_cache:
+            entry = file_cache[path]
+            able_stripped = entry["able_stripped"]
+            if able_stripped is None:
+                continue
+            able_norm = entry["able_norm"]
+            if able_norm in candidates:
+                ableton_matches.append(path)
+                continue
+            able_canon = entry["able_canon"]
+            if able_canon in canon_candidates or any(able_canon.startswith(c) for c in canon_candidates):
+                ableton_canon_matches.append(path)
+                continue
+            norm2 = entry["norm2"]
+            canon2 = entry["canon2"]
+            if norm2 in candidates:
+                exact_prefix_matches.append(path)
+                continue
+            if canon2 in canon_candidates or any(canon2.startswith(c) for c in canon_candidates):
+                canonical_matches.append(path)
+                continue
+            if any(norm2.startswith(c) for c in candidates):
+                fuzzy_matches.append(path)
+        else:
+            able_stripped = strip_stem_prefix(path.stem, project_name)
+            if able_stripped is None:
+                continue
+            able_norm = normalize_name(able_stripped)
+            if able_norm in candidates:
+                ableton_matches.append(path)
+                continue
+            able_canon = canonical_name(able_stripped)
+            if able_canon in canon_candidates or any(able_canon.startswith(c) for c in canon_candidates):
+                ableton_canon_matches.append(path)
+                continue
+            prefix_stripped = strip_project_prefix(path.stem, project_name)
+            norm2 = normalize_name(prefix_stripped)
+            canon2 = canonical_name(prefix_stripped)
+            if norm2 in candidates:
+                exact_prefix_matches.append(path)
+                continue
+            if canon2 in canon_candidates or any(canon2.startswith(c) for c in canon_candidates):
+                canonical_matches.append(path)
+                continue
+            if any(norm2.startswith(c) for c in candidates):
+                fuzzy_matches.append(path)
 
     if len(ableton_matches) == 1:
         return ableton_matches[0], "ableton-default"
@@ -203,8 +251,9 @@ def execute_phase1(
     manifest_path: Path | None = None,
     place_als_path: Path | None = None,
     bpm_override: float | None = None,
+    parsed_set: ParsedSet | None = None,
 ) -> dict[str, Any]:
-    parsed = read_als(als_path)
+    parsed = parsed_set if parsed_set is not None else read_als(als_path)
     operations, warnings = build_rename_plan(als_path, exports_dir, output_dir, parsed_set=parsed)
     output_dir.mkdir(parents=True, exist_ok=True)
 

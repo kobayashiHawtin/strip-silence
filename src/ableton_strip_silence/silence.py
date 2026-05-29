@@ -10,6 +10,8 @@ import re
 import struct
 from typing import Any
 
+import numpy as np
+
 from . import __version__
 
 LOGGER = logging.getLogger(__name__)
@@ -183,7 +185,69 @@ def detect_active_spans(wave: WaveData, settings: TrimSettings) -> list[tuple[in
     return detect_active_regions(wave, settings).spans
 
 
+def _wave_to_np_peaks(wave: WaveData) -> np.ndarray | None:
+    try:
+        frames = wave.frame_count
+        channels = wave.channels
+        tag = wave.effective_format_tag
+        bps = wave.bits_per_sample
+
+        if tag == IEEE_FLOAT_FORMAT:
+            if bps == 64:
+                arr = np.frombuffer(wave.data, dtype=np.float64).reshape(frames, channels).astype(np.float32)
+            else:
+                arr = np.frombuffer(wave.data, dtype=np.float32).reshape(frames, channels)
+        elif bps == 8:
+            arr = np.frombuffer(wave.data, dtype=np.uint8).reshape(frames, channels).astype(np.float32)
+            arr = (arr - 128.0) / 128.0
+        elif bps == 16:
+            arr = np.frombuffer(wave.data, dtype=np.int16).reshape(frames, channels).astype(np.float32)
+            arr /= 32768.0
+        elif bps == 24:
+            raw = np.frombuffer(wave.data, dtype=np.uint8).reshape(frames, channels * 3)
+            lo = raw[:, 0::3].astype(np.int32)
+            mi = raw[:, 1::3].astype(np.int32)
+            hi = raw[:, 2::3].astype(np.int32)
+            samples = lo | (mi << 8) | (hi << 16)
+            sign_mask = samples & 0x800000
+            samples = np.where(sign_mask, samples - 0x1000000, samples)
+            arr = samples.astype(np.float32) / 8388608.0
+        elif bps == 32:
+            arr = np.frombuffer(wave.data, dtype=np.int32).reshape(frames, channels).astype(np.float32)
+            arr /= 2147483648.0
+        else:
+            return None
+
+        peaks = np.max(np.abs(arr), axis=1)
+        np.clip(peaks, 0.0, 1.0, out=peaks)
+        return peaks
+    except Exception:
+        LOGGER.debug("numpy conversion failed for %s, falling back", wave.path.name)
+        return None
+
+
+def _compute_window_levels_np(peaks: np.ndarray, frame_count: int, window: int, hop: int, detection: str) -> list[tuple[int, int, float]]:
+    measured: list[tuple[int, int, float]] = []
+    for start in range(0, frame_count, hop):
+        end = min(frame_count, start + window)
+        segment = peaks[start:end]
+        if detection == "peak":
+            level = float(segment.max())
+        elif detection == "rms":
+            level = float(np.sqrt(np.mean(segment ** 2)))
+        else:
+            peak_val = float(segment.max())
+            rms_val = float(np.sqrt(np.mean(segment ** 2)))
+            level = max(rms_val, peak_val * 0.5)
+        measured.append((start, end, level))
+    return measured
+
+
 def detect_active_regions(wave: WaveData, settings: TrimSettings) -> DetectionResult:
+    np_peaks = _wave_to_np_peaks(wave)
+    if np_peaks is not None:
+        return _np_detect_active_regions(np_peaks, wave, settings)
+
     window = max(1, ms_to_samples(wave.sample_rate, settings.window_ms))
     hop = max(1, ms_to_samples(wave.sample_rate, settings.hop_ms))
     frame_count = wave.frame_count
@@ -215,6 +279,38 @@ def detect_active_regions(wave: WaveData, settings: TrimSettings) -> DetectionRe
         if level >= threshold:
             raw_spans.append((start, end))
 
+    merged = merge_spans(raw_spans, max_gap=ms_to_samples(wave.sample_rate, settings.min_silence_ms))
+    leading = ms_to_samples(wave.sample_rate, settings.keep_leading_ms)
+    trailing = ms_to_samples(wave.sample_rate, settings.keep_trailing_ms)
+    min_clip = ms_to_samples(wave.sample_rate, settings.min_clip_ms)
+
+    expanded: list[tuple[int, int]] = []
+    for start, end in merged:
+        expanded_start = max(0, start - leading)
+        expanded_end = min(frame_count, end + trailing)
+        if expanded_end - expanded_start >= min_clip:
+            expanded.append((expanded_start, expanded_end))
+    return DetectionResult(spans=merge_spans(expanded, max_gap=0), threshold_db=threshold_db, threshold_mode=threshold_mode)
+
+
+def _np_detect_active_regions(peaks: np.ndarray, wave: WaveData, settings: TrimSettings) -> DetectionResult:
+    window = max(1, ms_to_samples(wave.sample_rate, settings.window_ms))
+    hop = max(1, ms_to_samples(wave.sample_rate, settings.hop_ms))
+    frame_count = wave.frame_count
+    measured_windows = _compute_window_levels_np(peaks, frame_count, window, hop, settings.detection)
+
+    if settings.threshold_db is None:
+        threshold = adaptive_threshold(measured_windows)
+        threshold_db = amplitude_to_db(threshold)
+        threshold_mode = "adaptive"
+    else:
+        threshold = threshold_to_amplitude(settings.threshold_db)
+        threshold_db = settings.threshold_db
+        threshold_mode = "fixed"
+
+    LOGGER.debug("%s: using %s threshold %.2f dBFS", wave.path.name, threshold_mode, threshold_db)
+
+    raw_spans: list[tuple[int, int]] = [(s, e) for s, e, lvl in measured_windows if lvl >= threshold]
     merged = merge_spans(raw_spans, max_gap=ms_to_samples(wave.sample_rate, settings.min_silence_ms))
     leading = ms_to_samples(wave.sample_rate, settings.keep_leading_ms)
     trailing = ms_to_samples(wave.sample_rate, settings.keep_trailing_ms)

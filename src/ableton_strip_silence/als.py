@@ -280,6 +280,8 @@ def format_export_name(track: TrackInfo, extension: str) -> str:
 def find_arrangement_events_container(track: TrackInfo) -> Optional[ET.Element]:
     if track.element is None:
         return None
+    if track._container_cache is not None:
+        return track._container_cache
 
     priority_paths = [
         ["ArrangementClipsListWrapper", "Events"],
@@ -292,18 +294,22 @@ def find_arrangement_events_container(track: TrackInfo) -> Optional[ET.Element]:
     for path in priority_paths:
         node = find_path(track.element, path)
         if node is not None:
+            track._container_cache = node
             return node
 
     wrapper = child_by_local_name(track.element, "ArrangementClipsListWrapper")
     if wrapper is not None:
         for candidate in list(wrapper):
             if local_name(candidate.tag) in {"Events", "Clips"}:
+                track._container_cache = candidate
                 return candidate
 
     for candidate in track.element.iter():
         if local_name(candidate.tag) in {"Events", "Clips"} and list(candidate):
             if any(local_name(grandchild.tag) == "AudioClip" for grandchild in list(candidate)):
+                track._container_cache = candidate
                 return candidate
+    track._container_cache = None
     return None
 
 
@@ -324,20 +330,24 @@ def find_audio_clip_template(root: ET.Element, track: Optional[TrackInfo] = None
     return None
 
 
-def next_clip_id(root: ET.Element) -> int:
-    values: list[int] = []
-    for node in root.iter():
-        if local_name(node.tag) != "AudioClip":
-            continue
-        raw = node.attrib.get("Id")
-        if raw and raw.isdigit():
-            values.append(int(raw))
-        id_node = child_by_local_name(node, "Id")
-        if id_node is not None:
-            value = id_node.attrib.get("Value")
-            if value and value.isdigit():
-                values.append(int(value))
-    return (max(values) + 1) if values else 1
+def next_clip_id(parsed: ParsedSet) -> int:
+    if parsed._next_clip_id == 0:
+        values: list[int] = []
+        for node in parsed.root.iter():
+            if local_name(node.tag) != "AudioClip":
+                continue
+            raw = node.attrib.get("Id")
+            if raw and raw.isdigit():
+                values.append(int(raw))
+            id_node = child_by_local_name(node, "Id")
+            if id_node is not None:
+                value = id_node.attrib.get("Value")
+                if value and value.isdigit():
+                    values.append(int(value))
+        parsed._next_clip_id = (max(values) + 1) if values else 1
+    result = parsed._next_clip_id
+    parsed._next_clip_id += 1
+    return result
 
 
 def next_numeric_value(root: ET.Element, tag_names: Iterable[str], default_start: int = 1) -> int:
@@ -520,7 +530,7 @@ def build_audio_clip(
 
     if template is None:
         LOGGER.debug("No existing AudioClip template found. Creating a minimal AudioClip node.")
-        clip = ET.Element(qname(namespace, "AudioClip"), {"Id": str(next_clip_id(parsed.root)), "Time": f"{start_beats:.12f}"})
+        clip = ET.Element(qname(namespace, "AudioClip"), {"Id": str(next_clip_id(parsed)), "Time": f"{start_beats:.12f}"})
         append_value_element(clip, namespace, "Name", clip_name)
         append_value_element(clip, namespace, "LomId", str(next_numeric_value(parsed.root, {"LomId"}, default_start=1)))
         append_value_element(clip, namespace, "CurrentStart", f"{start_beats:.12f}")
@@ -551,7 +561,7 @@ def build_audio_clip(
     clip = template
     clip.attrib["Time"] = f"{start_beats:.12f}"
     if "Id" in clip.attrib:
-        clip.attrib["Id"] = str(next_clip_id(parsed.root))
+        clip.attrib["Id"] = str(next_clip_id(parsed))
 
     set_value_on_first_descendant(clip, {"LomId"}, str(next_numeric_value(parsed.root, {"LomId"}, default_start=1)))
     if set_value_on_first_descendant(clip, {"TakeId"}, str(next_numeric_value(parsed.root, {"TakeId"}, default_start=1))):
@@ -574,22 +584,23 @@ def build_audio_clip(
 
 
 def update_source_timing(clip: ET.Element, source_start: str, source_end: str | None, source_out_marker: str | None) -> None:
-    set_value_on_first_descendant(clip, {"LoopStart"}, source_start)
-    set_value_on_first_descendant(clip, {"HiddenLoopStart"}, source_start)
-    set_value_on_first_descendant(clip, {"StartRelative"}, source_start)
-    set_value_on_first_descendant(clip, {"LeftTime"}, source_start)
-    set_value_on_first_descendant(clip, {"AnchorTime"}, source_start)
-    set_value_on_first_descendant(clip, {"OtherTime"}, source_start)
-    set_value_on_first_descendant(clip, {"FreezeStart"}, source_start)
+    start_tags = {"LoopStart", "HiddenLoopStart", "StartRelative", "LeftTime", "AnchorTime", "OtherTime", "FreezeStart"}
+    for node in clip.iter():
+        tag = local_name(node.tag)
+        if tag in start_tags:
+            node.attrib["Value"] = source_start
 
     if source_end is None:
         return
-    set_value_on_first_descendant(clip, {"LoopEnd"}, source_end)
-    set_value_on_first_descendant(clip, {"HiddenLoopEnd"}, source_end)
-    set_value_on_first_descendant(clip, {"RightTime"}, source_end)
-    if source_out_marker is not None:
-        set_value_on_first_descendant(clip, {"OutMarker"}, source_out_marker)
-    set_value_on_first_descendant(clip, {"FreezeEnd"}, source_start)
+    end_tags = {"LoopEnd", "HiddenLoopEnd", "RightTime"}
+    for node in clip.iter():
+        tag = local_name(node.tag)
+        if tag == "FreezeEnd":
+            node.attrib["Value"] = source_start
+        elif tag in end_tags:
+            node.attrib["Value"] = source_end
+        elif tag == "OutMarker" and source_out_marker is not None:
+            node.attrib["Value"] = source_out_marker
 
 
 def insert_clip(parsed: ParsedSet, track: TrackInfo, clip: ET.Element) -> None:
