@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .als import build_audio_clip, clear_audio_clips, find_arrangement_events_container, fix_orphan_clips, insert_clip, read_als, track_by_index, track_by_name, write_als
-from .audio import extract_serial_index, read_wave_metadata, resolve_render_start_samples, samples_to_beats
+from .audio import BeatMapEntry, build_beat_map, extract_serial_index, read_wave_metadata, resolve_render_start_samples, sample_position_to_beats, samples_to_beats
 from . import __version__
 from .models import ParsedSet
 from .models import RenderClip
@@ -86,6 +86,14 @@ def execute_phase2(
     if bpm is None:
         raise Phase2RestoreError("Could not determine BPM from ALS. Please provide --bpm explicitly.")
 
+    beat_map: list[BeatMapEntry] = []
+    if parsed.tempo_automation is not None and bpm_override is None:
+        beat_map = build_beat_map(parsed.tempo_automation)
+        if beat_map:
+            LOGGER.info("Using tempo automation with %d breakpoints for sample-to-beat conversion", len(parsed.tempo_automation))
+        else:
+            LOGGER.info("Tempo automation envelope found but no events; using constant BPM=%.1f", bpm)
+
     render_clips, _ = parse_render_clips(als_path, renders_dir, bpm_override=bpm, parsed_set=parsed)
 
     if clear_existing:
@@ -113,8 +121,12 @@ def execute_phase2(
             LOGGER.warning("Skipping track '%s': no arrangement events container (MIDI track?).", render.matched_track.name)
             skipped_tracks.append(render.matched_track.name)
             continue
-        start_beats = samples_to_beats(render.start_samples, render.sample_rate, bpm)
-        end_beats = samples_to_beats(render.start_samples + render.duration_samples, render.sample_rate, bpm)
+        if beat_map:
+            start_beats = sample_position_to_beats(render.start_samples, render.sample_rate, beat_map)
+            end_beats = sample_position_to_beats(render.start_samples + render.duration_samples, render.sample_rate, beat_map)
+        else:
+            start_beats = samples_to_beats(render.start_samples, render.sample_rate, bpm)
+            end_beats = samples_to_beats(render.start_samples + render.duration_samples, render.sample_rate, bpm)
         LOGGER.info(
             "Insert %s on track '%s' at %.6f beats -> %.6f beats",
             render.path.name,

@@ -4,6 +4,7 @@ import logging
 import re
 import struct
 import wave
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -133,3 +134,122 @@ def samples_to_beats(sample_count: int, sample_rate: int, bpm: float) -> float:
     if bpm <= 0:
         raise ValueError("BPM must be positive.")
     return (sample_count / sample_rate) * (bpm / 60.0)
+
+
+BEZIER_SUBDIVISIONS = 100
+
+
+@dataclass(slots=True)
+class BeatMapEntry:
+    wall_seconds: float = 0.0
+    beats: float = 0.0
+    bpm: float = 120.0
+
+
+def _cubic_bezier(p0: float, p1: float, p2: float, p3: float, u: float) -> float:
+    omu = 1.0 - u
+    omu2 = omu * omu
+    omu3 = omu2 * omu
+    u2 = u * u
+    u3 = u2 * u
+    return omu3 * p0 + 3.0 * omu2 * u * p1 + 3.0 * omu * u2 * p2 + u3 * p3
+
+
+def build_beat_map(
+    tempo_automation: list[tuple[float, float, Optional[float], Optional[float], Optional[float], Optional[float]]],
+    max_seconds: float = 1e12,
+) -> list[BeatMapEntry]:
+    if not tempo_automation:
+        return []
+
+    normalized: dict[float, tuple[float, float, Optional[float], Optional[float], Optional[float], Optional[float]]] = {}
+    for entry in tempo_automation:
+        t = 0.0 if entry[0] < 0 else entry[0]
+        normalized[t] = (t, entry[1], entry[2], entry[3], entry[4], entry[5])
+
+    distinct_times = sorted(normalized.keys())
+    by_time = [normalized[t] for t in distinct_times]
+    if not by_time:
+        return []
+
+    entries: list[BeatMapEntry] = [BeatMapEntry(wall_seconds=0.0, beats=0.0, bpm=by_time[0][1])]
+    current_seconds = 0.0
+
+    for i in range(len(by_time) - 1):
+        t0, v0, c1x, c1y, c2x, c2y = by_time[i]
+        t1, v1, _c1x, _c1y, _c2x, _c2y = by_time[i + 1]
+
+        beat0 = t0
+        beat1 = t1
+        beat_span = beat1 - beat0
+        if beat_span <= 0:
+            continue
+
+        has_curve = c1x is not None and c1y is not None and c2x is not None and c2y is not None
+
+        if has_curve:
+            p0x, p0y = t0, v0
+            p3x, p3y = t1, v1
+            p1x = t0 + c1x * (t1 - t0)
+            p1y = v0 + c1y * (v1 - v0)
+            p2x = t1 - c2x * (t1 - t0)
+            p2y = v1 - c2y * (v1 - v0)
+
+            seg_seconds = 0.0
+            for j in range(BEZIER_SUBDIVISIONS):
+                ua = j / BEZIER_SUBDIVISIONS
+                ub = (j + 1) / BEZIER_SUBDIVISIONS
+
+                xa = _cubic_bezier(p0x, p1x, p2x, p3x, ua)
+                xb = _cubic_bezier(p0x, p1x, p2x, p3x, ub)
+                delta_16th = xb - xa
+
+                umid = (ua + ub) / 2.0
+                bpm_mid = _cubic_bezier(p0y, p1y, p2y, p3y, umid)
+                if bpm_mid <= 0:
+                    continue
+
+                delta_beats = delta_16th
+                seg_seconds += delta_beats / (bpm_mid / 60.0)
+
+            current_seconds += seg_seconds
+            entries.append(BeatMapEntry(wall_seconds=current_seconds, beats=beat1, bpm=v1))
+        else:
+            bpm = v0
+            if bpm <= 0:
+                continue
+            seg_seconds = beat_span / (bpm / 60.0)
+            current_seconds += seg_seconds
+            entries.append(BeatMapEntry(wall_seconds=current_seconds, beats=beat1, bpm=v1))
+
+    return entries
+
+
+def sample_position_to_beats(
+    start_samples: int,
+    sample_rate: int,
+    beat_map: list[BeatMapEntry],
+) -> float:
+    if not beat_map:
+        raise ValueError("Beat map is empty")
+    target_sec = start_samples / sample_rate
+
+    if target_sec <= beat_map[0].wall_seconds:
+        return beat_map[0].beats
+    if target_sec >= beat_map[-1].wall_seconds:
+        last = beat_map[-1]
+        overshoot_sec = target_sec - last.wall_seconds
+        return last.beats + overshoot_sec * (last.bpm / 60.0)
+
+    lo, hi = 0, len(beat_map) - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if beat_map[mid].wall_seconds <= target_sec:
+            lo = mid
+        else:
+            hi = mid
+
+    seg0 = beat_map[lo]
+    seg1 = beat_map[hi]
+    ratio = (target_sec - seg0.wall_seconds) / (seg1.wall_seconds - seg0.wall_seconds)
+    return seg0.beats + ratio * (seg1.beats - seg0.beats)

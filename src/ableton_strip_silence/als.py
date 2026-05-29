@@ -39,7 +39,8 @@ def read_als(path: Path) -> ParsedSet:
     namespace = detect_namespace(root)
     tracks = extract_tracks(root)
     tempo = extract_tempo(root)
-    return ParsedSet(path=path, tree=tree, root=root, namespace=namespace, tempo_bpm=tempo, tracks=tracks)
+    tempo_automation = extract_tempo_automation(root)
+    return ParsedSet(path=path, tree=tree, root=root, namespace=namespace, tempo_bpm=tempo, tempo_automation=tempo_automation, tracks=tracks)
 
 
 def write_als(parsed: ParsedSet, output_path: Path) -> None:
@@ -248,6 +249,85 @@ def extract_tempo(root: ET.Element) -> Optional[float]:
         except ValueError:
             LOGGER.debug("Failed to parse tempo value: %s", raw)
     return None
+
+
+def extract_tempo_automation(root: ET.Element) -> Optional[list[tuple[float, float, Optional[float], Optional[float], Optional[float], Optional[float]]]]:
+    tempo = find_path(root, ["LiveSet", "MainTrack", "DeviceChain", "Mixer", "Tempo"]) or \
+            find_path(root, ["LiveSet", "MasterTrack", "DeviceChain", "Mixer", "Tempo"])
+    if tempo is None:
+        return None
+
+    automation_target = child_by_local_name(tempo, "AutomationTarget")
+    if automation_target is None:
+        return None
+    target_id = automation_target.attrib.get("Id")
+    if target_id is None:
+        return None
+
+    main_track = find_path(root, ["LiveSet", "MainTrack"]) or \
+                 find_path(root, ["LiveSet", "MasterTrack"])
+    if main_track is None:
+        return None
+
+    automation_envelopes = child_by_local_name(main_track, "AutomationEnvelopes")
+    if automation_envelopes is None:
+        return None
+    envelopes = child_by_local_name(automation_envelopes, "Envelopes")
+    if envelopes is None:
+        return None
+
+    for env_elem in envelopes:
+        if local_name(env_elem.tag) != "AutomationEnvelope":
+            continue
+        env_target = child_by_local_name(env_elem, "EnvelopeTarget")
+        if env_target is None:
+            continue
+        pointee_id = child_by_local_name(env_target, "PointeeId")
+        if pointee_id is None:
+            continue
+        if pointee_id.attrib.get("Value") != target_id:
+            continue
+
+        automation = child_by_local_name(env_elem, "Automation")
+        if automation is None:
+            return None
+        events = child_by_local_name(automation, "Events")
+        if events is None:
+            return None
+
+        result: list[tuple[float, float, Optional[float], Optional[float], Optional[float], Optional[float]]] = []
+        for float_event in events:
+            if local_name(float_event.tag) != "FloatEvent":
+                continue
+            time_str = float_event.attrib.get("Time")
+            value_str = float_event.attrib.get("Value")
+            if time_str is None or value_str is None:
+                continue
+            try:
+                time_val = float(time_str)
+                bpm_val = float(value_str)
+            except ValueError:
+                continue
+
+            c1x = _parse_opt_float(float_event.attrib.get("CurveControl1X"))
+            c1y = _parse_opt_float(float_event.attrib.get("CurveControl1Y"))
+            c2x = _parse_opt_float(float_event.attrib.get("CurveControl2X"))
+            c2y = _parse_opt_float(float_event.attrib.get("CurveControl2Y"))
+
+            result.append((time_val, bpm_val, c1x, c1y, c2x, c2y))
+
+        return result if result else None
+
+    return None
+
+
+def _parse_opt_float(s: str | None) -> Optional[float]:
+    if s is None:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
 
 def find_path(element: ET.Element, parts: list[str]) -> Optional[ET.Element]:

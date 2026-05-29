@@ -333,7 +333,7 @@ def adaptive_threshold(measured_windows: list[tuple[int, int, float]]) -> float:
     noise_floor = percentile(nonzero, 5.0)
     signal_reference = percentile(nonzero, 95.0)
 
-    threshold = noise_floor * 1.5
+    threshold = noise_floor * 1.2
     if signal_reference > 0:
         threshold = min(threshold, signal_reference * 0.5)
     return max(threshold, threshold_to_amplitude(-90.0))
