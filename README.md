@@ -18,6 +18,7 @@ It provides an end-to-end workflow:
 - `dry-run`, logs, and manifest output for traceability
 - Multi-mode silence detection (hybrid, peak, RMS)
 - Flexible trim parameters for different audio material types
+- Tempo automation-aware sample-to-beat conversion — preserves clip alignment in projects with BPM changes
 
 ## Requirements
 
@@ -137,7 +138,7 @@ Default log: `<output>.parent/phase2.log`
 
 ### ALS-Specific Options
 
-- `--bpm VALUE`: Override BPM if tempo cannot be read from `.als`
+- `--bpm VALUE`: Override BPM (disables tempo automation; uses constant BPM for all calculations)
 
 ### Audio Clip Management (`auto` command only)
 
