@@ -87,24 +87,29 @@ def extract_serial_index(base_name: str) -> Optional[int]:
 
 
 def read_bwf_time_reference_samples(path: Path) -> Optional[int]:
-    data = path.read_bytes()
-    if len(data) < 12 or data[0:4] != b"RIFF" or data[8:12] != b"WAVE":
-        return None
+    with path.open("rb") as handle:
+        header = handle.read(12)
+        if len(header) < 12 or header[0:4] != b"RIFF" or header[8:12] != b"WAVE":
+            return None
 
-    offset = 12
-    while offset + 8 <= len(data):
-        chunk_id = data[offset : offset + 4]
-        chunk_size = struct.unpack_from("<I", data, offset + 4)[0]
-        chunk_data_start = offset + 8
-        chunk_data_end = chunk_data_start + chunk_size
-        if chunk_data_end > len(data):
-            break
-        if chunk_id == b"bext":
-            if chunk_size < 338:
-                return None
-            time_ref_low, time_ref_high = struct.unpack_from("<II", data, chunk_data_start + 330)
-            return (time_ref_high << 32) | time_ref_low
-        offset = chunk_data_end + (chunk_size % 2)
+        while True:
+            chunk_header = handle.read(8)
+            if len(chunk_header) < 8:
+                break
+            chunk_id = chunk_header[0:4]
+            chunk_size = struct.unpack("<I", chunk_header[4:8])[0]
+            if chunk_id == b"bext":
+                if chunk_size < 338:
+                    return None
+                handle.seek(330, 1)
+                time_ref = handle.read(8)
+                if len(time_ref) < 8:
+                    return None
+                time_ref_low, time_ref_high = struct.unpack("<II", time_ref)
+                return (time_ref_high << 32) | time_ref_low
+            if chunk_size % 2 == 1:
+                chunk_size += 1
+            handle.seek(chunk_size, 1)
     return None
 
 
