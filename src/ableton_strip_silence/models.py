@@ -16,6 +16,7 @@ class TrackInfo:
     group_path: list[str] = field(default_factory=lambda: [])
     group_resolution: str = "unresolved"
     element: Optional[ET.Element] = None
+    _container_cache: Optional[ET.Element] = None
 
     @property
     def prefixed_name(self) -> str:
@@ -32,6 +33,7 @@ class ParsedSet:
     namespace: str
     tempo_bpm: Optional[float]
     tracks: list[TrackInfo]
+    _next_clip_id: int = 0
 
 
 @dataclass(slots=True)
