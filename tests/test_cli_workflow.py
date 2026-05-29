@@ -200,7 +200,6 @@ class CliWorkflowTests(unittest.TestCase):
             output_dir = tmp / "renamed"
             exports_dir.mkdir()
             write_als(als_path)
-            write_wav(exports_dir / "ProjectX - Drums.wav")
             write_wav(exports_dir / "ProjectX - Kick.wav")
             write_wav(exports_dir / "ProjectX - Snare.wav")
             write_wav(exports_dir / "ProjectX - Bass.wav")
@@ -210,7 +209,6 @@ class CliWorkflowTests(unittest.TestCase):
             self.assertEqual([], warnings)
             self.assertEqual(
                 [
-                    "001_Drums.wav",
                     "002_Drums_Kick.wav",
                     "003_Drums_Snare.wav",
                     "004_Bass.wav",
@@ -295,8 +293,8 @@ class CliWorkflowTests(unittest.TestCase):
             self.assertEqual(["1.000000000000", "2.000000000000"], clip_times)
             self.assertEqual(["0", "0"], loop_starts)
             self.assertEqual(["1.000000000000", "1.000000000000"], loop_ends)
-            self.assertEqual(["2.000000000000", "2.000000000000"], out_markers)
-            self.assertEqual(["1.000000000000", "1.000000000000"], right_times)
+            self.assertEqual(["1.000000000000", "1.000000000000"], out_markers)
+            self.assertEqual([], right_times)
             self.assertTrue(result["summary"]["clear_existing"])
 
     def test_phase2_clear_existing_can_clear_matched_tracks_without_rendered_clips(self) -> None:

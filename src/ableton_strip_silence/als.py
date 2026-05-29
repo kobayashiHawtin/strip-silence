@@ -531,7 +531,7 @@ def find_project_root(start: Path) -> Path:
         if (current / "Ableton Project Info").is_dir():
             return current
         current = current.parent
-    return start
+    return start.parent
 
 
 def fix_orphan_clips(parsed: ParsedSet) -> None:
