@@ -32,6 +32,7 @@ class ParsedSet:
     root: ET.Element
     namespace: str
     tempo_bpm: Optional[float]
+    tempo_automation: Optional[list[tuple[float, float, Optional[float], Optional[float], Optional[float], Optional[float]]]]
     tracks: list[TrackInfo]
     _next_clip_id: int = 0
 

@@ -8,7 +8,7 @@ import unittest
 import wave
 import xml.etree.ElementTree as ET
 
-from ableton_strip_silence.audio import parse_timecode_from_name, read_bwf_time_reference_samples, samples_to_beats
+from ableton_strip_silence.audio import build_beat_map, parse_timecode_from_name, read_bwf_time_reference_samples, sample_position_to_beats, samples_to_beats
 from ableton_strip_silence.cli import build_parser, resolve_auto_paths
 from ableton_strip_silence.phase1 import build_rename_plan, execute_phase1
 from ableton_strip_silence.phase2 import execute_phase2, parse_render_clips
@@ -329,6 +329,16 @@ class CliWorkflowTests(unittest.TestCase):
         parsed = parse_timecode_from_name(Path("002_Drums_Kick_tc_48000.wav"))
         self.assertEqual(("002_Drums_Kick", 48000), parsed)
         self.assertAlmostEqual(2.0, samples_to_beats(48000, 48000, 120.0))
+
+    def test_beat_map_normalizes_negative_automation_start(self) -> None:
+        beat_map = build_beat_map([
+            (-63072000.0, 116.0, None, None, None, None),
+            (256.0, 136.0, None, None, None, None),
+        ])
+
+        self.assertAlmostEqual(19.333333333333332, sample_position_to_beats(480000, 48000, beat_map))
+        self.assertAlmostEqual(77.33333333333333, sample_position_to_beats(1920000, 48000, beat_map))
+        self.assertAlmostEqual(409.1954022988506, sample_position_to_beats(9600000, 48000, beat_map))
 
     def test_bwf_reader_returns_none_for_plain_wav(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

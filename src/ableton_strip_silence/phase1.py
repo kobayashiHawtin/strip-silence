@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .als import build_audio_clip, find_arrangement_events_container, format_export_name, insert_clip, normalize_name, read_als, strip_project_prefix, write_als
-from .audio import read_wave_metadata, samples_to_beats
+from .audio import BeatMapEntry, build_beat_map, read_wave_metadata, sample_position_to_beats, samples_to_beats
 from . import __version__
 from .models import ParsedSet
 from .models import RenameOperation, TrackInfo
@@ -210,6 +210,7 @@ def place_stems_into_als(
     operations: list[RenameOperation],
     output_path: Path,
     bpm: float,
+    beat_map: list[BeatMapEntry] | None = None,
 ) -> None:
     placed = 0
     skipped: list[str] = []
@@ -218,7 +219,10 @@ def place_stems_into_als(
         track = operation.track
         stem_path = operation.destination
         sample_rate, frame_count = read_wave_metadata(stem_path)
-        duration_beats = samples_to_beats(frame_count, sample_rate, bpm)
+        if beat_map:
+            duration_beats = sample_position_to_beats(frame_count, sample_rate, beat_map)
+        else:
+            duration_beats = samples_to_beats(frame_count, sample_rate, bpm)
         container = find_arrangement_events_container(track)
         if container is None:
             LOGGER.warning("Skipping track '%s': no arrangement events container (MIDI track?).", track.name)
@@ -279,8 +283,13 @@ def execute_phase1(
         bpm = bpm_override if bpm_override is not None else parsed.tempo_bpm
         if bpm is None:
             raise ValueError("Cannot place stems: BPM could not be determined from ALS. Use --bpm.")
+        beat_map: list[BeatMapEntry] = []
+        if parsed.tempo_automation is not None and bpm_override is None:
+            beat_map = build_beat_map(parsed.tempo_automation)
+            if beat_map:
+                LOGGER.info("Using tempo automation with %d breakpoints for stem placement", len(parsed.tempo_automation))
         LOGGER.info("Placing %d stem(s) into ALS: %s", len(operations), place_als_path)
-        place_stems_into_als(parsed, operations, place_als_path, bpm)
+        place_stems_into_als(parsed, operations, place_als_path, bpm, beat_map=beat_map or None)
 
     unmatched_tracks = [
         {
