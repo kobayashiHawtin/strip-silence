@@ -9,7 +9,8 @@ description = "Automate Ableton Live export renaming, silence stripping, and ALS
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "defusedxml>=0.7.1"
+  "defusedxml>=0.7.1",
+  "numpy>=1.24.0"
 ]
 authors = [
   { name = "GitHub Copilot" }
